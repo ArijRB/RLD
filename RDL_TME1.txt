@@ -1,0 +1,6 @@
+Dans la courbe de regret on peut voir que la pires des stratégies testé est la
+stratégies random et la meilleur est évidement la stratégies optimales avec 0 de
+regret puisque c'est notre référence(pour le calcul du regret).
+Ensuite nous avons la stratégies UCB que l'on vois s'amméliorer notablement avec le temps, et la
+stratégies LinUCB qui elle s'amméliore plus rapidement que UCB et arrive presque au score de la stratégie
+statique.
