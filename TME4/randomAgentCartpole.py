@@ -41,7 +41,7 @@ class DQNAgent(object):
         self.action_space = action_space
         self.capacity = capacity
         self.RM = []
-        self.Q = NN(tailleDescription,action_space.n,[5,5])
+        self.Q = NN(tailleDescription,action_space.n,[24,24])
         self.Q_m = copy.deepcopy(self.Q)
         self.optimizer = torch.optim.Adam(self.Q.parameters())
         self.epsilon = epsilon
@@ -58,12 +58,12 @@ class DQNAgent(object):
         if(np.random.random()<self.epsilon):
             action = self.action_space.sample()
         else:
-            pred = self.Q(descriptionEtat)
+            pred = self.Q_m(descriptionEtat)
             pred = pred.detach().numpy()
             maxi = np.max(pred)
             action = np.random.choice(np.where(pred == maxi)[0],1)[0]
         if(self.lastAction == None):
-            self.lastAction = action 
+            self.lastAction = action
             self.lastDesc = descriptionEtat
             return action
         triplet = (self.lastDesc.numpy(),self.lastAction,reward,descriptionEtat.numpy(),done)
@@ -73,7 +73,8 @@ class DQNAgent(object):
             indice = self.compteur%self.capacity
             self.RM[indice] = triplet
             self.compteur+=1
-        
+
+        self.optimizer.zero_grad()
         rand_indice = np.random.randint(0,len(self.RM),self.miniBatchSize)
         miniBatch = np.array(self.RM)[rand_indice]
         criterion = torch.nn.SmoothL1Loss()
@@ -98,10 +99,10 @@ class DQNAgent(object):
             self.Q_m = copy.deepcopy(self.Q)
             self.step = 0
         self.step+=1
-        self.lastAction = action 
+        self.lastAction = action
         self.lastDesc = descriptionEtat
         return action
-        
+
 
 
 
@@ -116,7 +117,7 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     #agent = RandomAgent(env.action_space)
-    agent = DQNAgent(env.action_space, 1000,4,0.5,32,0.9,10)
+    agent = DQNAgent(action_space = env.action_space, capacity = 1000,tailleDescription = 4,epsilon = 0.1 ,miniBatchSize = 64,gamma = 0.9,stepMAJ=10)
     outdir = 'cartpole-v0/random-agent-results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)
@@ -130,7 +131,7 @@ if __name__ == '__main__':
 
     for i in range(episode_count):
         obs = envm.reset()
-        env.verbose = (i % 100 == 0 and i > 0)  # afficher 1 episode sur 100
+        env.verbose = (i % 10 == 0 and i > 0)  # afficher 1 episode sur 100
         if env.verbose:
             env.render()
         j = 0
