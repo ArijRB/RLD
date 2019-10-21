@@ -1,4 +1,5 @@
-import matplotlib
+import matplotlib 
+import matplotlib.pyplot as plt
 
 matplotlib.use("TkAgg")
 import gym
@@ -43,7 +44,7 @@ if __name__ == '__main__':
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.setPlan("gridworldPlans/plan0.txt", {0: -0.001, 3: 1, 4: 1, 5: -1, 6: -1})
     env.seed(0)  # Initialiser le pseudo aleatoire
-    episode_count = 10000
+    episode_count = 100
     reward = 0
     done = False
     rsum = 0
