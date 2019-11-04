@@ -1,5 +1,5 @@
 import matplotlib
-
+import matplotlib.pyplot as plt
 matplotlib.use("TkAgg")
 import gym
 import gridworld
@@ -52,12 +52,12 @@ class NN2(nn.Module):
 
 
 
-class A3C(object):
+class A2C(object):
     """The world's simplest agent!"""
-    def __init__(self, action_space,tailleDescription, tMax,gamma):
+    def __init__(self, action_space,tailleDescription, tMax,gamma, pasMaj):
         self.action_space = action_space
-        self.Pi = NN2(tailleDescription,action_space.n,[24,24])
-        self.V = NN1(tailleDescription,1,[24,24])
+        self.Pi = NN2(tailleDescription,action_space.n,[200])
+        self.V = NN1(tailleDescription,1,[200])
         self.tMax = tMax
         self.t = 0
         self.tstart = 0
@@ -67,6 +67,7 @@ class A3C(object):
         self.gamma = gamma
         self.optimPi = torch.optim.Adam(self.Pi.parameters(),lr=1e-3)
         self.optimV = torch.optim.Adam(self.V.parameters(),lr=1e-3)
+        self.pasMaj = pasMaj
 
     def act(self, observation, reward, done):
         descriptionEtat = torch.Tensor(observation)
@@ -88,8 +89,9 @@ class A3C(object):
                 new.backward()
                 new2 = torch.pow(R-self.V(self.saveObs[i]),2)
                 new2.backward()
-            self.optimPi.step()
-            self.optimV.step()
+            if( (self.t%self.tMax) % self.pasMaj == 0):
+                self.optimPi.step()
+                self.optimV.step()
             self.tstart = self.t
         return act
 
@@ -107,7 +109,7 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     #agent = RandomAgent(env.action_space)
-    agent = A3C(action_space = env.action_space,tailleDescription = 4, tMax=50,gamma = 0.99)
+    agent = A2C(action_space = env.action_space,tailleDescription = 4, tMax=99999,gamma = 0.99, pasMaj = 1)
     outdir = 'cartpole-v0/random-agent-results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)
@@ -118,6 +120,8 @@ if __name__ == '__main__':
     env.verbose = True
     np.random.seed(5)
     rsum = 0
+
+    all_rewards = []
 
     for i in range(episode_count):
         obs = envm.reset()
@@ -135,7 +139,10 @@ if __name__ == '__main__':
                 env.render()
             if done:
                 print("Episode : " + str(i) + " rsum=" + str(rsum) + ", " + str(j) + " actions")
+                all_rewards.append(rsum)
                 break
 
     print("done")
     env.close()
+    plt.plot(all_rewards)
+    plt.show()
