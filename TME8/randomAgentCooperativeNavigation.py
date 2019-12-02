@@ -12,6 +12,8 @@ import multiagent.scenarios as scenarios
 from gym import wrappers, logger
 import numpy as np
 import copy
+import torch.nn as nn
+import numpy as np
 
 
 """
@@ -63,19 +65,78 @@ def make_env(scenario_name, benchmark=False):
     scenario.reset_world(world)
     return env,scenario,world
 
+class NN(nn.Module):
+    def __init__(self, inSize, outSize, layers=[]):
+        super(NN, self).__init__()
+        self.layers = nn.ModuleList([])
+        for x in layers:
+            self.layers.append(nn.Linear(inSize, x))
+            inSize = x
+        self.layers.append(nn.Linear(inSize, outSize))
+    def forward(self, x):
+        x = self.layers[0](x)
+        for i in range(1, len(self.layers)):
+            x = torch.nn.functional.leaky_relu(x)
+            x = self.layers[i](x)
+        return x
+
+class NN_softmax(nn.Module):
+    def __init__(self, inSize, outSize, layers=[]):
+        super(NN_softmax, self).__init__()
+        self.layers = nn.ModuleList([])
+        for x in layers:
+            self.layers.append(nn.Linear(inSize, x))
+            inSize = x
+        self.layers.append(nn.Linear(inSize, outSize))
+    def forward(self, x):
+        x = self.layers[0](x)
+        for i in range(1, len(self.layers)):
+            x = torch.nn.functional.leaky_relu(x)
+            x = self.layers[i](x)
+        x = torch.nn.functional.softmax(x)
+        return x
+
+class all_agent():
+    def __init__(self,number_of_agent,taille_obs,taille_action_space):
+        self.number_of_agent = number_of_agent
+        self.taille_obs = taille_obs
+        self.taille_action_space = taille_action_space
+        self.liste_Q = []
+        self.liste_mu = []
+        self.liste_mu_target = []
+        for _ in range(number_of_agent):
+            Q = NN( (taille_obs+taille_action_space)*number_of_agent,1,layers=[25])
+            self.liste_Q.append(Q)
+            mu = NN_softmax(taille_obs,taille_action_space)
+            self.liste_mu.append(mu)
+            mu_target = NN_softmax(taille_obs,taille_action_space)
+            self.liste_mu_target.append(mu_target)
+    def act(self, obs):
+        all_action = []
+        for num_agent in range(self.number_of_agent):
+            N = np.random.multivariate_normal(,1,self.taille_action_space)
+            mu = self.liste_mu[num_agent](obs[num_agent])
+            action = mu + N
+            all_action.append(action)
+        return all_action
+
+
+        
+
+
 if __name__ == '__main__':
 
 
     env,scenario,world = make_env('simple_spread')
-
+    decideur = all_agent(len(env.agents),len(env.observation_space),len(env.action_space))
     o = env.reset()
     reward = []
     for _ in range(100):
-        a = []
-        for i, _ in enumerate(env.agents):
-            a.append((np.random.rand(2)-0.5)*2)
+        print(o)
+        a = decideur.act(o)
         o, r, d, i = env.step(a)
-        print(o, r, d, i)
+        #print(o, r, d, i)
+        print(a)
 
         reward.append(r)
         env.render(mode="none")
