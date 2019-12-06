@@ -14,6 +14,8 @@ import numpy as np
 import copy
 import torch.nn as nn
 import numpy as np
+import torch
+from random import sample 
 
 
 """
@@ -97,28 +99,75 @@ class NN_softmax(nn.Module):
         return x
 
 class all_agent():
-    def __init__(self,number_of_agent,taille_obs,taille_action_space):
+    def __init__(self,number_of_agent,taille_obs,taille_action_space,number_sample,GAMMA=0.99):
+        print("Taille obs space",taille_obs)
+        print("Action Space size",taille_action_space)
         self.number_of_agent = number_of_agent
         self.taille_obs = taille_obs
         self.taille_action_space = taille_action_space
+        self.number_sample = number_sample
+        self.gamma = GAMMA
         self.liste_Q = []
         self.liste_mu = []
         self.liste_mu_target = []
+        self.liste_Q_opti = []
         for _ in range(number_of_agent):
             Q = NN( (taille_obs+taille_action_space)*number_of_agent,1,layers=[25])
             self.liste_Q.append(Q)
+            opti_Q = torch.optim.Adam(self.Q.parameters())
+            self.liste_Q_opti.append(opti_Q)
             mu = NN_softmax(taille_obs,taille_action_space)
             self.liste_mu.append(mu)
             mu_target = NN_softmax(taille_obs,taille_action_space)
             self.liste_mu_target.append(mu_target)
-    def act(self, obs):
+        self.experience = []
+        self.ancien_obs = None
+        self.ancien_action = None
+    
+    def act(self, obs, reward):
+        if(self.ancien_obs != None):
+            self.experience.append((self.ancien_obs,self.ancien_action,r,o))
         all_action = []
         for num_agent in range(self.number_of_agent):
-            N = np.random.multivariate_normal(,1,self.taille_action_space)
-            mu = self.liste_mu[num_agent](obs[num_agent])
-            action = mu + N
-            all_action.append(action)
+            N = np.random.standard_normal(self.taille_action_space)
+            obs_agent = torch.tensor(obs[num_agent]).float()
+            mu = self.liste_mu[num_agent](obs_agent)
+            action = mu.detach().numpy() + N
+            print(action)
+            all_action.append(np.array(action))
+        self.ancien_obs = o
+        self.ancien_action = all_action
         return all_action
+
+    def optim_reseaux(self):
+        sample = sample(self.experience,self.number_sample)
+        for num_agent in range(self.number_of_agent):
+            label_agent = []
+            batch_pred = torch.tensor([])
+            for x, a, r, x_prime in zip(sample):
+                #Calcul des labels y_i
+                action_with_target_net = torch.tensor([])
+                for num_agent2 in range(self.number_of_agent):
+                    N = np.random.standard_normal(self.taille_action_space)
+                    obs_agent = torch.tensor(x_prime[num_agent2]).float()
+                    mu_prime = self.liste_mu_target[num_agent2](obs_agent)
+                    action_target = mu + torch.tensor(N)
+                    action_with_target_net.cat(action_target)
+                entree_Q = torch.cat(x_prime,action_with_target_net)
+                Q_value = self.liste_Q[num_agent](entree_Q)
+                y_i = r + self.gamma*Q_value
+                label_agent.append(y_i)
+                #Calcul des predictions du réseaux
+                entree_Q = torch.cat(x,a)
+                batch_pred = torch.stack(batch_pred,entree_Q)
+            self.liste_Q_opti[num_agent].zero_grad()
+            pred = self.liste_Q[num_agent](batch_pred)
+            loss = self.criterion(pred,label_agent)
+            self.liste_Q_opti[num_agent].step()
+
+                
+
+
 
 
         
@@ -128,16 +177,15 @@ if __name__ == '__main__':
 
 
     env,scenario,world = make_env('simple_spread')
-    decideur = all_agent(len(env.agents),len(env.observation_space),len(env.action_space))
     o = env.reset()
+    decideur = all_agent(len(env.agents),len(o[0]),env.world.dim_p,20)
+    r=0
     reward = []
     for _ in range(100):
         print(o)
-        a = decideur.act(o)
+        a = decideur.act(o,r)
         o, r, d, i = env.step(a)
-        #print(o, r, d, i)
         print(a)
-
         reward.append(r)
         env.render(mode="none")
     print(reward)
