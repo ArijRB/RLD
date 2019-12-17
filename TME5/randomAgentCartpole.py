@@ -71,8 +71,11 @@ class A2C(object):
 
     def act(self, observation, reward, done):
         descriptionEtat = torch.Tensor(observation)
-        act = np.argmax(self.Pi(descriptionEtat).detach().numpy())
-        if(not(done) or self.t-self.tstart==self.tMax):
+        #print(self.Pi(descriptionEtat).detach())
+        act = torch.distributions.categorical.Categorical(self.Pi(descriptionEtat).detach())
+        act = act.sample().numpy()
+        #print(act)
+        if(not(done)) : #and  not(self.t-self.tstart==self.tMax)):
             self.t +=1
             self.saveObs.append(descriptionEtat.detach())
             self.saveR.append(reward)
@@ -83,16 +86,25 @@ class A2C(object):
                 R = 0
             else:
                 R = self.V(descriptionEtat).detach()
-            for i in range(self.t-1,self.tstart,-1):
+            for i in range(len(self.saveR)-1,-1,-1):
                 R = self.saveR[i] + self.gamma * R
-                new = torch.log(self.Pi(self.saveObs[i])[self.action[i]])*(R-self.V(self.saveObs[i]).detach())
+                #print()
+                new = -torch.log(self.Pi(self.saveObs[i])[self.action[i]])*(R-self.V(self.saveObs[i]).detach())
                 new.backward()
                 new2 = torch.pow(R-self.V(self.saveObs[i]),2)
                 new2.backward()
+            """
             if( (self.t%self.tMax) % self.pasMaj == 0):
                 self.optimPi.step()
                 self.optimV.step()
-            self.tstart = self.t
+            """
+            self.optimPi.step()
+            self.optimV.step()
+            #self.tstart = self.t
+            self.saveObs = []
+            self.saveR = []
+            self.action = []
+            self.t = 0
         return act
 
 
@@ -114,7 +126,7 @@ if __name__ == '__main__':
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)
 
-    episode_count = 10000
+    episode_count = 1000
     reward = 0
     done = False
     env.verbose = True

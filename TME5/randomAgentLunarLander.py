@@ -1,5 +1,5 @@
 import matplotlib
-
+import matplotlib.pyplot as plt
 matplotlib.use("TkAgg")
 import gym
 import gridworld
@@ -9,11 +9,19 @@ import copy
 import torch
 import torch.nn as nn
 
+class RandomAgent(object):
+    """The world's simplest agent!"""
+
+    def __init__(self, action_space):
+        self.action_space = action_space
+
+    def act(self, observation, reward, done):
+        return self.action_space.sample()
 
 
-class NN(nn.Module):
+class NN1(nn.Module):
     def __init__(self, inSize, outSize, layers=[]):
-        super(NN, self).__init__()
+        super(NN1, self).__init__()
         self.layers = nn.ModuleList([])
         for x in layers:
             self.layers.append(nn.Linear(inSize, x))
@@ -26,83 +34,84 @@ class NN(nn.Module):
             x = self.layers[i](x)
         return x
 
-class RandomAgent(object):
+class NN2(nn.Module):
+    def __init__(self, inSize, outSize, layers=[]):
+        super(NN2, self).__init__()
+        self.layers = nn.ModuleList([])
+        for x in layers:
+            self.layers.append(nn.Linear(inSize, x))
+            inSize = x
+        self.layers.append(nn.Linear(inSize, outSize))
+    def forward(self, x):
+        x = self.layers[0](x)
+        for i in range(1, len(self.layers)):
+            x = torch.nn.functional.leaky_relu(x)
+            x = self.layers[i](x)
+        x = torch.nn.functional.softmax(x)
+        return x
+
+
+
+class A2C(object):
     """The world's simplest agent!"""
-
-    def __init__(self, action_space):
+    def __init__(self, action_space,tailleDescription, tMax,gamma, pasMaj):
         self.action_space = action_space
-
-    def act(self, observation, reward, done):
-        return self.action_space.sample()
-
-
-class DQNAgent(object):
-    """The world's simplest agent!"""
-    def __init__(self, action_space, capacity,tailleDescription,epsilon,miniBatchSize,gamma,stepMAJ):
-        self.action_space = action_space
-        self.capacity = capacity
-        self.RM = []
-        self.Q = NN(tailleDescription,action_space.n,[14,14])
-        self.Q_m = copy.deepcopy(self.Q)
-        self.optimizer = torch.optim.Adam(self.Q.parameters())
-        self.epsilon = epsilon
-        self.lastAction = None
-        self.lastDesc = None
-        self.compteur = 0
-        self.miniBatchSize = miniBatchSize
-        self.step = 0
+        self.Pi = NN2(tailleDescription,action_space.n,[50,50])
+        self.V = NN1(tailleDescription,1,[50,50])
+        self.tMax = tMax
+        self.t = 0
+        self.tstart = 0
+        self.saveR = []
+        self.saveObs = []
+        self.action = []
         self.gamma = gamma
-        self.stepMAJ = stepMAJ
+        self.optimPi = torch.optim.Adam(self.Pi.parameters(),lr=1e-3)
+        self.optimV = torch.optim.Adam(self.V.parameters(),lr=1e-3)
+        self.pasMaj = pasMaj
 
     def act(self, observation, reward, done):
         descriptionEtat = torch.Tensor(observation)
-        if(np.random.random()<self.epsilon):
-            action = self.action_space.sample()
+        #print(self.Pi(descriptionEtat).detach())
+        act = torch.distributions.categorical.Categorical(self.Pi(descriptionEtat).detach())
+        act = act.sample().numpy()
+        #print(act)
+        if(not(done)) : #and  not(self.t-self.tstart==self.tMax)):
+            self.t +=1
+            self.saveObs.append(descriptionEtat.detach())
+            self.saveR.append(reward)
+            self.action.append(act)
+            return act
         else:
-            pred = self.Q_m(descriptionEtat)
-            pred = pred.detach().numpy()
-            maxi = np.max(pred)
-            action = np.random.choice(np.where(pred == maxi)[0],1)[0]
-        if(self.lastAction == None):
-            self.lastAction = action
-            self.lastDesc = descriptionEtat
-            return action
-        triplet = (self.lastDesc.numpy(),self.lastAction,reward,descriptionEtat.numpy(),done)
-        if(len(self.RM)< self.capacity):
-            self.RM.append(triplet)
-        else:
-            indice = self.compteur%self.capacity
-            self.RM[indice] = triplet
-            self.compteur+=1
-
-        self.optimizer.zero_grad()
-        rand_indice = np.random.randint(0,len(self.RM),self.miniBatchSize)
-        miniBatch = np.array(self.RM)[rand_indice]
-        criterion = torch.nn.SmoothL1Loss()
-        x = torch.Tensor([m[0] for m in miniBatch])
-        y = []
-        action_eff = [m[1] for m in miniBatch]
-        for m in miniBatch:
-            if(m[4]):
-                y.append(m[2])
+            if(done):
+                R = 0
             else:
-                maxi = np.max(self.Q_m(torch.Tensor(m[3])).detach().numpy())
-                y.append(m[2]+self.gamma*maxi)
-        y = torch.Tensor(y)
-        pred = self.Q(x)
-        action_eff = torch.LongTensor(action_eff)
-        pred = pred[range(self.miniBatchSize),action_eff]
-        loss = criterion(pred,y)
-        loss.backward()
-        self.optimizer.step()
+                R = self.V(descriptionEtat).detach()
+            for i in range(len(self.saveR)-1,-1,-1):
+                R = self.saveR[i] + self.gamma * R
+                #print()
+                new = -torch.log(self.Pi(self.saveObs[i])[self.action[i]])*(R-self.V(self.saveObs[i]).detach())
+                new.backward()
+                new2 = torch.pow(R-self.V(self.saveObs[i]),2)
+                new2.backward()
+            """
+            if( (self.t%self.tMax) % self.pasMaj == 0):
+                self.optimPi.step()
+                self.optimV.step()
+            """
+            self.optimPi.step()
+            self.optimV.step()
+            #self.tstart = self.t
+            self.saveObs = []
+            self.saveR = []
+            self.action = []
+            self.t = 0
+        return act
 
-        if(self.step > self.stepMAJ):
-            self.Q_m = copy.deepcopy(self.Q)
-            self.step = 0
-        self.step+=1
-        self.lastAction = action
-        self.lastDesc = descriptionEtat
-        return action
+
+
+
+
+
 
 
 if __name__ == '__main__':
@@ -112,19 +121,20 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     #agent = RandomAgent(env.action_space)
-    agent = DQNAgent(action_space = env.action_space, capacity = 1000,tailleDescription = 8,epsilon = 0.1 ,miniBatchSize = 128,gamma = 0.9,stepMAJ=10)
-
-    outdir = 'LunarLander-v2/results'
+    agent = A2C(action_space = env.action_space,tailleDescription = 8, tMax=99999,gamma = 0.99, pasMaj = 10)
+    outdir = 'cartpole-v0/random-agent-results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)
 
-    episode_count = 1000000
+    episode_count = 5000
     reward = 0
     done = False
     env.verbose = True
     np.random.seed(5)
     rsum = 0
-    env._max_episode_steps = 200
+
+    all_rewards = []
+
     for i in range(episode_count):
         obs = envm.reset()
         env.verbose = (i % 10 == 0 and i > 0)  # afficher 1 episode sur 100
@@ -141,7 +151,10 @@ if __name__ == '__main__':
                 env.render()
             if done:
                 print("Episode : " + str(i) + " rsum=" + str(rsum) + ", " + str(j) + " actions")
+                all_rewards.append(rsum)
                 break
 
     print("done")
     env.close()
+    plt.plot(all_rewards)
+    plt.show()

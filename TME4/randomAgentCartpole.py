@@ -37,14 +37,14 @@ class NN(nn.Module):
 
 class DQNAgent(object):
     """The world's simplest agent!"""
-    def __init__(self, action_space, capacity,tailleDescription,epsilon,miniBatchSize,gamma,stepMAJ):
+    def __init__(self, action_space, capacity,tailleDescription,miniBatchSize,gamma,stepMAJ):
         self.action_space = action_space
         self.capacity = capacity
         self.RM = []
         self.Q = NN(tailleDescription,action_space.n,[24,24])
         self.Q_m = copy.deepcopy(self.Q)
-        self.optimizer = torch.optim.Adam(self.Q.parameters())
-        self.epsilon = epsilon
+        self.optimizer = torch.optim.Adam(self.Q.parameters(),lr=1e-3)
+        self.epsilon = 1
         self.lastAction = None
         self.lastDesc = None
         self.compteur = 0
@@ -66,6 +66,7 @@ class DQNAgent(object):
             self.lastAction = action
             self.lastDesc = descriptionEtat
             return action
+        self.epsilon -= 0.001
         triplet = (self.lastDesc.numpy(),self.lastAction,reward,descriptionEtat.numpy(),done)
         if(len(self.RM)< self.capacity):
             self.RM.append(triplet)
@@ -117,7 +118,7 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     #agent = RandomAgent(env.action_space)
-    agent = DQNAgent(action_space = env.action_space, capacity = 1000,tailleDescription = 4,epsilon = 0.1 ,miniBatchSize = 64,gamma = 0.9,stepMAJ=10)
+    agent = DQNAgent(action_space = env.action_space, capacity = 1000,tailleDescription = 4 ,miniBatchSize = 64,gamma = 0.9,stepMAJ=10)
     outdir = 'cartpole-v0/random-agent-results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)

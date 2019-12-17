@@ -93,9 +93,10 @@ class DQNAgent(object):
             if(self.list_e_a_r_d[t][3]):
                 t_r=0
         #Optimiser le réseaux V avec les differents labels
-
+        
         #Optimiser le réseaux Pi
         for _ in range(self.nbstep):
+        
 
 
 
