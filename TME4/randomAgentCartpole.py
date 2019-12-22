@@ -8,6 +8,7 @@ import numpy as np
 import copy
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 class RandomAgent(object):
     """The world's simplest agent!"""
@@ -37,7 +38,7 @@ class NN(nn.Module):
 
 class DQNAgent(object):
     """The world's simplest agent!"""
-    def __init__(self, action_space, capacity,tailleDescription,miniBatchSize,gamma,stepMAJ):
+    def __init__(self, action_space, capacity,tailleDescription,miniBatchSize,gamma,stepMAJ,exp_replay=True):
         self.action_space = action_space
         self.capacity = capacity
         self.RM = []
@@ -52,6 +53,7 @@ class DQNAgent(object):
         self.step = 0
         self.gamma = gamma
         self.stepMAJ = stepMAJ
+        self.exp_replay = exp_replay
 
     def act(self, observation, reward, done):
         descriptionEtat = torch.Tensor(observation)
@@ -76,24 +78,44 @@ class DQNAgent(object):
             self.compteur+=1
 
         self.optimizer.zero_grad()
-        rand_indice = np.random.randint(0,len(self.RM),self.miniBatchSize)
-        miniBatch = np.array(self.RM)[rand_indice]
         criterion = torch.nn.SmoothL1Loss()
-        x = torch.Tensor([m[0] for m in miniBatch])
-        y = []
-        action_eff = [m[1] for m in miniBatch]
-        for m in miniBatch:
-            if(m[4]):
-                y.append(m[2])
-            else:
-                maxi = np.max(self.Q_m(torch.Tensor(m[3])).detach().numpy())
-                y.append(m[2]+self.gamma*maxi)
-        y = torch.Tensor(y)
-        pred = self.Q(x)
-        action_eff = torch.LongTensor(action_eff)
-        pred = pred[range(self.miniBatchSize),action_eff]
-        loss = criterion(pred,y)
-        loss.backward()
+        if(self.exp_replay):
+            rand_indice = np.random.randint(0,len(self.RM),self.miniBatchSize)
+            miniBatch = np.array(self.RM)[rand_indice]
+            x = torch.Tensor([m[0] for m in miniBatch])
+            y = []
+            action_eff = [m[1] for m in miniBatch]
+            for m in miniBatch:
+                if(m[4]):
+                    y.append(m[2])
+                else:
+                    maxi = np.max(self.Q_m(torch.Tensor(m[3])).detach().numpy())
+                    y.append(m[2]+self.gamma*maxi)
+            y = torch.Tensor(y)
+            pred = self.Q(x)
+            action_eff = torch.LongTensor(action_eff)
+            pred = pred[range(self.miniBatchSize),action_eff]
+            loss = criterion(pred,y)
+            loss.backward()
+        else:
+            rand_indice = np.array([len(self.RM)-1])
+            miniBatch = np.array(self.RM)[rand_indice]
+            x = torch.Tensor([m[0] for m in miniBatch])
+            y = []
+            action_eff = [m[1] for m in miniBatch]
+            for m in miniBatch:
+                if(m[4]):
+                    y.append(m[2])
+                else:
+                    maxi = np.max(self.Q_m(torch.Tensor(m[3])).detach().numpy())
+                    y.append(m[2]+self.gamma*maxi)
+            y = torch.Tensor(y)
+            pred = self.Q(x)
+            action_eff = torch.LongTensor(action_eff)
+            #pred = pred[range(self.miniBatchSize),action_eff]
+            loss = criterion(pred,y)
+            loss.backward()
+
         self.optimizer.step()
 
         if(self.step > self.stepMAJ):
@@ -106,11 +128,6 @@ class DQNAgent(object):
 
 
 
-
-
-
-
-
 if __name__ == '__main__':
 
 
@@ -118,17 +135,20 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     #agent = RandomAgent(env.action_space)
-    agent = DQNAgent(action_space = env.action_space, capacity = 1000,tailleDescription = 4 ,miniBatchSize = 64,gamma = 0.9,stepMAJ=10)
+    #Réseaux sans target network <=> stepMaj =0
+    #Réseaux avec target network <=> stepMaj =10
+    agent = DQNAgent(action_space = env.action_space, capacity = 1000,tailleDescription = 4 ,miniBatchSize = 64,gamma = 0.9,stepMAJ=10,exp_replay=True)
     outdir = 'cartpole-v0/random-agent-results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)
 
-    episode_count = 1000000
+    episode_count = 250
     reward = 0
     done = False
     env.verbose = True
     np.random.seed(5)
     rsum = 0
+    all_reward = []
 
     for i in range(episode_count):
         obs = envm.reset()
@@ -145,8 +165,14 @@ if __name__ == '__main__':
             if env.verbose:
                 env.render()
             if done:
+                all_reward.append(rsum)
                 print("Episode : " + str(i) + " rsum=" + str(rsum) + ", " + str(j) + " actions")
                 break
-
+    
     print("done")
     env.close()
+    print("Itération max",np.argmax(all_reward))
+    print("Le max est de",np.max(all_reward))
+    plt.clf()
+    plt.plot(all_reward)
+    plt.show()

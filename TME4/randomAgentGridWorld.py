@@ -8,7 +8,7 @@ import numpy as np
 import copy
 import torch
 import torch.nn as nn
-
+import matplotlib.pyplot as plt
 
 class NN(nn.Module):
     def __init__(self, inSize, outSize, layers=[]):
@@ -38,7 +38,7 @@ class RandomAgent(object):
 
 class DQNAgent(object):
     """The world's simplest agent!"""
-    def __init__(self, action_space, capacity,tailleDescription,epsilon,miniBatchSize,gamma,stepMAJ):
+    def __init__(self, action_space, capacity,tailleDescription,epsilon,miniBatchSize,gamma,stepMAJ, exp_replay=True):
         self.action_space = action_space
         self.capacity = capacity
         self.RM = []
@@ -53,8 +53,13 @@ class DQNAgent(object):
         self.step = 0
         self.gamma = gamma
         self.stepMAJ = stepMAJ
+        self.exp_replay = exp_replay
 
     def act(self, observation, reward, done):
+        #On transforme notre observation avec le code fournit dans l'énoncé du TME
+        observation = self.getFeatures(observation)
+        observation = observation.reshape(-1)
+        #print(observation.shape)
         descriptionEtat = torch.Tensor(observation)
         if(np.random.random()<self.epsilon):
             action = self.action_space.sample()
@@ -76,31 +81,44 @@ class DQNAgent(object):
             self.compteur+=1
 
         self.optimizer.zero_grad()
-        rand_indice = np.random.randint(0,len(self.RM),self.miniBatchSize)
-        print("self_RM",self.RM)
-        miniBatch = np.array(self.RM)[rand_indice]
-        #print("minibatch",miniBatch)
         criterion = torch.nn.SmoothL1Loss()
-        x = torch.Tensor([m[0] for m in miniBatch])
-        y = []
-        action_eff = [m[1] for m in miniBatch]
-        for m in miniBatch:
-            if(m[4]):
-                y.append(m[2])
-            else:
-                maxi = np.max(self.Q_m(torch.Tensor(m[3])).detach().numpy())
-                y.append(m[2]+self.gamma*maxi)
-        y = torch.Tensor(y)
-        print("x",x.shape)
-        pred = self.Q(x)
-        action_eff = torch.LongTensor(action_eff)
-        print(pred.shape)
-        print(action_eff.shape)
-        pred = pred[range(self.miniBatchSize),action_eff]
-        print(pred.shape)
-        print(y.shape)
-        loss = criterion(pred,y)
-        loss.backward()
+        if(self.exp_replay):
+            rand_indice = np.random.randint(0,len(self.RM),self.miniBatchSize)
+            miniBatch = np.array(self.RM)[rand_indice]
+            x = torch.Tensor([m[0] for m in miniBatch])
+            y = []
+            action_eff = [m[1] for m in miniBatch]
+            for m in miniBatch:
+                if(m[4]):
+                    y.append(m[2])
+                else:
+                    maxi = np.max(self.Q_m(torch.Tensor(m[3])).detach().numpy())
+                    y.append(m[2]+self.gamma*maxi)
+            y = torch.Tensor(y)
+            pred = self.Q(x)
+            action_eff = torch.LongTensor(action_eff)
+            pred = pred[range(self.miniBatchSize),action_eff]
+            loss = criterion(pred,y)
+            loss.backward()
+        else:
+            rand_indice = np.array([len(self.RM)-1])
+            miniBatch = np.array(self.RM)[rand_indice]
+            x = torch.Tensor([m[0] for m in miniBatch])
+            y = []
+            action_eff = [m[1] for m in miniBatch]
+            for m in miniBatch:
+                if(m[4]):
+                    y.append(m[2])
+                else:
+                    maxi = np.max(self.Q_m(torch.Tensor(m[3])).detach().numpy())
+                    y.append(m[2]+self.gamma*maxi)
+            y = torch.Tensor(y)
+            pred = self.Q(x)
+            action_eff = torch.LongTensor(action_eff)
+            #pred = pred[range(self.miniBatchSize),action_eff]
+            loss = criterion(pred,y)
+            loss.backward()
+
         self.optimizer.step()
 
         if(self.step > self.stepMAJ):
@@ -110,6 +128,13 @@ class DQNAgent(object):
         self.lastAction = action
         self.lastDesc = descriptionEtat
         return action
+    
+    def getFeatures(self, obs):
+        state=np.zeros((3,np.shape(obs)[0],np.shape(obs)[1]))
+        state[0]=np.where(obs == 2,1,state[0])
+        state[1] = np.where(obs == 4, 1, state[1])
+        state[2] = np.where(obs == 6, 1, state[2])
+        return state.reshape(1,-1)
 
 
 class FeaturesExtractor(object):
@@ -131,7 +156,8 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     #agent = RandomAgent(env.action_space)
-    agent = DQNAgent(action_space = env.action_space, capacity = 1000,tailleDescription = 6,epsilon = 0.1 ,miniBatchSize = 128,gamma = 0.9,stepMAJ=10)
+    #Réseaux sans target network <=> stepMaj =0
+    agent = DQNAgent(action_space = env.action_space, capacity = 1000,tailleDescription = 108,epsilon = 0.1 ,miniBatchSize = 128,gamma = 0.999,stepMAJ=10,exp_replay=True)
 
 
     # Faire un fichier de log sur plusieurs scenarios
@@ -139,9 +165,10 @@ if __name__ == '__main__':
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.setPlan("gridworldPlans/plan0.txt", {0: -0.001, 3: 1, 4: 1, 5: -1, 6: -1})
     env.seed(0)  # Initialiser le pseudo aleatoire
-    episode_count = 10000
+    episode_count = 1000
     reward = 0
     done = False
+    all_reward = []
     rsum = 0
     FPS = 0.0001
     for i in range(episode_count):
@@ -159,8 +186,20 @@ if __name__ == '__main__':
             if env.verbose:
                 env.render(FPS)
             if done:
+                all_reward.append(rsum)
                 print("Episode : " + str(i) + " rsum=" + str(rsum) + ", " + str(j) + " actions")
                 break
 
     print("done")
     env.close()
+    print("Itération max",np.argmax(all_reward))
+    print("Le max est de",np.max(all_reward))
+    plt.clf()
+    plt.plot(all_reward)
+    plt.show()
+
+    new_all_reward = []
+    for k in range(len(all_reward)-10):
+        new_all_reward.append(np.mean(all_reward[k:k+10]))
+    plt.plot(new_all_reward)
+    plt.show()
