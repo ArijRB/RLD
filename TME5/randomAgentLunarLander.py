@@ -82,25 +82,17 @@ class A2C(object):
             self.action.append(act)
             return act
         else:
-            if(done):
-                R = 0
-            else:
-                R = self.V(descriptionEtat).detach()
+            R = 0
             for i in range(len(self.saveR)-1,-1,-1):
                 R = self.saveR[i] + self.gamma * R
-                #print()
                 new = -torch.log(self.Pi(self.saveObs[i])[self.action[i]])*(R-self.V(self.saveObs[i]).detach())
                 new.backward()
                 new2 = torch.pow(R-self.V(self.saveObs[i]),2)
                 new2.backward()
-            """
-            if( (self.t%self.tMax) % self.pasMaj == 0):
-                self.optimPi.step()
-                self.optimV.step()
-            """
+  
             self.optimPi.step()
             self.optimV.step()
-            #self.tstart = self.t
+    
             self.saveObs = []
             self.saveR = []
             self.action = []
