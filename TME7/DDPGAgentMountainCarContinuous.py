@@ -1,5 +1,4 @@
 import matplotlib
-
 matplotlib.use("TkAgg")
 import gym
 import gridworld
@@ -32,13 +31,15 @@ class DDPGAgent(object):
     #DDPG SANS TARGET NETWORK
     def __init__(self,tailleDesc, low, high, number_of_update=3,batch_size=10 ,freq_update=20, gamma=0.001):
         self.Q = NN(tailleDesc+1,1,[5])
+        self.Q_target=copy.deepcopy(self.Q)
         self.mu = NN(tailleDesc,1,[5])
+        self.mu_target =copy.deepcopy(self.mu)
         self.freq_update = freq_update
         self.number_of_update = number_of_update
         self.batch_size = batch_size
         self.gamma = gamma
         self.compteur = 0
-        self.list_e_a_r_d = []
+        self.list_o_a_r_d = []
         self.old_obs = None
         self.old_action = None
         self.low = low
@@ -58,7 +59,7 @@ class DDPGAgent(object):
             self.list_e_a_r_d.append(mem)  
         if(self.compteur > self.freq_update):
             for _ in range(self.number_of_update):
-                B = random.choices(self.list_e_a_r_d, k=self.batch_size)
+                B = random.choices(self.list_o_a_r_d, k=self.batch_size)
                 list_target =  []
                 entree_deuxieme_Q = []
                 entree_update_policy = []
