@@ -45,12 +45,12 @@ class NN_Pi(nn.Module):
 
 class PPO_classiqueAgent(object):
     """The world's simplest agent!"""
-    def __init__(self,tailleDesc, nbAction, nbEvent, nbstep,lambd, beta=1,gamma=0.9,sigma=0.01):
-        self.V = NN_V(tailleDesc,1,[5])
+    def __init__(self,tailleDesc, nbAction, nbEvent, nbstep,lambd, beta=1,gamma=0.9,sigma=1e-3):
+        self.V = NN_V(tailleDesc,1,[64])
         self.optimV = torch.optim.Adam(self.V.parameters())
-        self.Pi = NN_Pi(tailleDesc,nbAction,[5])
+        self.Pi = NN_Pi(tailleDesc,nbAction,[64])
         self.optimPi = torch.optim.Adam(self.Pi.parameters())
-        self.Pi_old = NN_Pi(tailleDesc,nbAction,[5])
+        self.Pi_old = NN_Pi(tailleDesc,nbAction,[64])
         self.nbAction = nbAction
         self.nbEvent = nbEvent
         self.beta = beta
@@ -69,7 +69,7 @@ class PPO_classiqueAgent(object):
         observation = observation
         if(self.old_obs is not None):
             self.list_e_a_r_d.append([self.old_obs,self.old_action,reward,done,self.old_distrib])
-        dist = self.Pi(torch.tensor(observation))
+        dist = self.Pi(torch.tensor(observation).float())
         #print(dist)
         m = torch.distributions.categorical.Categorical(dist)
         a = m.sample()
@@ -83,13 +83,13 @@ class PPO_classiqueAgent(object):
         if(self.compteur>self.nbEvent):
             self.optimisation()
             self.compteur = 0
-            self.list_e_a_r = []
+            self.list_e_a_r_d = []
         
         return a
     
     def optimisation(self):
         all_obs = [li[0] for li in self.list_e_a_r_d]
-        all_obs = torch.tensor(all_obs)
+        all_obs = torch.tensor(all_obs).float()
 
         action_prise = [li[1] for li in self.list_e_a_r_d]
         action_prise = torch.tensor(action_prise)
@@ -154,11 +154,19 @@ class PPO_classiqueAgent(object):
   
 
     def calc_avantage(self):
+        #Version simplifié
+        result = torch.tensor([li[2] for li in self.list_e_a_r_d]).detach().numpy() - self.V(torch.tensor([li[0] for li in self.list_e_a_r_d]).float().detach()).detach().numpy()
+        return result
+        
+
+        #Version trace eligibilité qui ne fonctionne pas pour l'instant
+        """
         av = []
         av.append(self.list_e_a_r_d[-1][2])
         for indice in range(len(self.list_e_a_r_d)-2,-1,-1):
             r = self.list_e_a_r_d[indice][2]
             obs = torch.tensor(self.list_e_a_r_d[indice][0])
+            done = torch.tensor(self.list_e_a_r_d[indice][3])
             if(not(done) and len(av) != 0):
                 calc = r+self.gamma * self.V(torch.tensor(self.list_e_a_r_d[indice+1][0])).detach() - self.V(obs).detach() + self.gamma*self.lambd*av[-1]
             elif(not(done)):
@@ -166,16 +174,18 @@ class PPO_classiqueAgent(object):
             else:
                 calc = r - self.V(obs).detach()
             av.append(calc)
+        """
+    
         return av
 
 class PPO_clipedAgent(object):
     """The world's simplest agent!"""
     def __init__(self,tailleDesc, nbAction, nbEvent, nbstep,lambd ,gamma=0.9,sigma=0.01,epsilon=1e-3):
-        self.V = NN_V(tailleDesc,1,[5])
-        self.optimV = torch.optim.Adam(self.V.parameters())
-        self.Pi = NN_Pi(tailleDesc,nbAction,[5])
-        self.optimPi = torch.optim.Adam(self.Pi.parameters())
-        self.Pi_old = NN_Pi(tailleDesc,nbAction,[5])
+        self.V = NN_V(tailleDesc,1,[64])
+        self.optimV = torch.optim.Adam(self.V.parameters(),lr=0.002)
+        self.Pi = NN_Pi(tailleDesc,nbAction,[64])
+        self.optimPi = torch.optim.Adam(self.Pi.parameters(),lr=0.002)
+        self.Pi_old = NN_Pi(tailleDesc,nbAction,[64])
         self.nbAction = nbAction
         self.nbEvent = nbEvent
         self.sigma = sigma
@@ -193,7 +203,7 @@ class PPO_clipedAgent(object):
         observation = observation
         if(self.old_obs is not None):
             self.list_e_a_r_d.append([self.old_obs,self.old_action,reward,done,self.old_distrib])
-        dist = self.Pi(torch.tensor(observation))
+        dist = self.Pi(torch.tensor(observation).float())
         #print(dist)
         m = torch.distributions.categorical.Categorical(dist)
         a = m.sample()
@@ -207,13 +217,13 @@ class PPO_clipedAgent(object):
         if(self.compteur>self.nbEvent):
             self.optimisation()
             self.compteur = 0
-            self.list_e_a_r = []
+            self.list_e_a_r_d = []
         
         return a
     
     def optimisation(self):
         all_obs = [li[0] for li in self.list_e_a_r_d]
-        all_obs = torch.tensor(all_obs)
+        all_obs = torch.tensor(all_obs).float()
         all_obs = all_obs.detach()
 
         action_prise = [li[1] for li in self.list_e_a_r_d]
@@ -222,9 +232,6 @@ class PPO_clipedAgent(object):
 
         saveR = [li[2] for li in self.list_e_a_r_d]
         saveR = torch.tensor(saveR)
-        
-        list_avantage = self.calc_avantage()
-        list_avantage = torch.tensor(list_avantage)
 
         cum_reward = []
         R = 0
@@ -244,18 +251,19 @@ class PPO_clipedAgent(object):
         self.optimV.step()
 
         self.Pi_old = copy.deepcopy(self.Pi)
-        pred_teta_k = self.Pi_old(all_obs)
-        pred_teta_k = pred_teta_k.detach()
+
         #On optimise le réseaux Pi pour nbstep
         for _ in range(self.nbstep):
+            list_avantage = self.calc_avantage()
+            list_avantage = torch.tensor(list_avantage)
             #Optimiser le réseaux Pi
             #PAS SUR POUR LES DETACH
             pred_Pi_all_obs = self.Pi(all_obs)
             pred_Pi_old_all_obs = self.Pi_old(all_obs).detach()
             Pi_act_value = pred_Pi_all_obs[range(len(pred_Pi_all_obs)),action_prise]
             Pi_old_act_value = pred_Pi_old_all_obs[range(len(pred_Pi_old_all_obs)),action_prise]
-            #A voir pourquoi exponentielle
-            ratios = torch.exp(Pi_act_value-Pi_old_act_value.detach())
+
+            ratios = Pi_act_value/Pi_old_act_value.detach()
 
             
             #On rajoute le moins pour maximiser
@@ -282,11 +290,19 @@ class PPO_clipedAgent(object):
   
 
     def calc_avantage(self):
+        #Version simplifié
+        result = torch.tensor([li[2] for li in self.list_e_a_r_d]).detach().numpy() - self.V(torch.tensor([li[0] for li in self.list_e_a_r_d]).float().detach()).detach().numpy()
+        return result
+        
+
+        #Version trace eligibilité qui ne fonctionne pas pour l'instant
+        """
         av = []
         av.append(self.list_e_a_r_d[-1][2])
         for indice in range(len(self.list_e_a_r_d)-2,-1,-1):
             r = self.list_e_a_r_d[indice][2]
             obs = torch.tensor(self.list_e_a_r_d[indice][0])
+            done = torch.tensor(self.list_e_a_r_d[indice][3])
             if(not(done) and len(av) != 0):
                 calc = r+self.gamma * self.V(torch.tensor(self.list_e_a_r_d[indice+1][0])).detach() - self.V(obs).detach() + self.gamma*self.lambd*av[-1]
             elif(not(done)):
@@ -294,23 +310,178 @@ class PPO_clipedAgent(object):
             else:
                 calc = r - self.V(obs).detach()
             av.append(calc)
+        """
+    
+        return av
+
+
+class PPO_wihtout_all(object):
+    """The world's simplest agent!"""
+    def __init__(self,tailleDesc, nbAction, nbEvent, nbstep,lambd ,gamma=0.9,sigma=0.01,epsilon=1e-3):
+        self.V = NN_V(tailleDesc,1,[64])
+        self.optimV = torch.optim.Adam(self.V.parameters(),lr=0.002)
+        self.Pi = NN_Pi(tailleDesc,nbAction,[64])
+        self.optimPi = torch.optim.Adam(self.Pi.parameters(),lr=0.002)
+        self.Pi_old = NN_Pi(tailleDesc,nbAction,[64])
+        self.nbAction = nbAction
+        self.nbEvent = nbEvent
+        self.sigma = sigma
+        self.gamma = gamma
+        self.nbstep = nbstep
+        self.lambd = lambd
+        self.epsilon = epsilon
+        self.compteur = 0
+        self.list_e_a_r_d = []
+        self.old_obs = None
+        self.old_action = None
+        self.old_distrib = None
+
+    def act(self, observation, reward, done):
+        observation = observation
+        if(self.old_obs is not None):
+            self.list_e_a_r_d.append([self.old_obs,self.old_action,reward,done,self.old_distrib])
+        dist = self.Pi(torch.tensor(observation).float())
+        #print(dist)
+        m = torch.distributions.categorical.Categorical(dist)
+        a = m.sample()
+        a = a.item()
+
+        self.old_obs = observation
+        self.old_action = a
+        self.old_distrib = dist.detach()
+
+        self.compteur+=1
+        if(self.compteur>self.nbEvent):
+            self.optimisation()
+            self.compteur = 0
+            self.list_e_a_r_d = []
+        
+        return a
+    
+    def optimisation(self):
+        all_obs = [li[0] for li in self.list_e_a_r_d]
+        all_obs = torch.tensor(all_obs).float()
+        all_obs = all_obs.detach()
+
+        action_prise = [li[1] for li in self.list_e_a_r_d]
+        action_prise = torch.tensor(action_prise)
+        action_prise = action_prise.detach()
+
+        saveR = [li[2] for li in self.list_e_a_r_d]
+        saveR = torch.tensor(saveR)
+
+        cum_reward = []
+        R = 0
+        for i in range(len(saveR)-1,-1,-1):
+            R = saveR[i] + self.gamma * R
+            cum_reward.append(R)
+        
+        #On obtimise le réseaux V
+        cum_reward = torch.tensor(cum_reward)
+        pred_V = self.V(all_obs)
+        pred_V = pred_V.reshape(-1)
+
+        criterion = torch.nn.MSELoss()
+        loss_V = criterion(cum_reward.detach(),pred_V)
+        self.optimV.zero_grad()
+        loss_V.backward()
+        self.optimV.step()
+
+        self.Pi_old = copy.deepcopy(self.Pi)
+
+        #On optimise le réseaux Pi pour nbstep
+        for _ in range(self.nbstep):
+            list_avantage = self.calc_avantage()
+            list_avantage = torch.tensor(list_avantage)
+            #Optimiser le réseaux Pi
+            #PAS SUR POUR LES DETACH
+            pred_Pi_all_obs = self.Pi(all_obs)
+            pred_Pi_old_all_obs = self.Pi_old(all_obs).detach()
+            Pi_act_value = pred_Pi_all_obs[range(len(pred_Pi_all_obs)),action_prise]
+            Pi_old_act_value = pred_Pi_old_all_obs[range(len(pred_Pi_old_all_obs)),action_prise]
+
+            ratios = Pi_act_value/Pi_old_act_value.detach()
+
+            
+            #On rajoute le moins pour maximiser
+            #PAS SUR DU LOG sur PI
+            premier_terme_min = ratios*list_avantage
+            #deuxieme_terme_min = torch.clamp(ratios,1-self.epsilon,1+self.epsilon)*list_avantage
+            #print("###############")
+            #print(ratios[0])
+            #print(1-self.epsilon)
+            #print(1+self.epsilon)
+            #print(premier_terme_min.shape)
+            #print(deuxieme_terme_min.shape)
+            #print(premier_terme_min[0])
+            #print(deuxieme_terme_min[0])
+            #mini = torch.min(premier_terme_min,deuxieme_terme_min)
+            #print(mini[0])
+            #print(mini.shape)
+            loss_Pi = -torch.sum(premier_terme_min)
+            #print(loss_Pi.shape)
+            #print("###############")
+            self.optimPi.zero_grad()
+            loss_Pi.backward()
+            self.optimPi.step()
+  
+
+    def calc_avantage(self):
+        #Version simplifié
+        result = torch.tensor([li[2] for li in self.list_e_a_r_d]).detach().numpy() - self.V(torch.tensor([li[0] for li in self.list_e_a_r_d]).float().detach()).detach().numpy()
+        return result
+        
+
+        #Version trace eligibilité qui ne fonctionne pas pour l'instant
+        """
+        av = []
+        av.append(self.list_e_a_r_d[-1][2])
+        for indice in range(len(self.list_e_a_r_d)-2,-1,-1):
+            r = self.list_e_a_r_d[indice][2]
+            obs = torch.tensor(self.list_e_a_r_d[indice][0])
+            done = torch.tensor(self.list_e_a_r_d[indice][3])
+            if(not(done) and len(av) != 0):
+                calc = r+self.gamma * self.V(torch.tensor(self.list_e_a_r_d[indice+1][0])).detach() - self.V(obs).detach() + self.gamma*self.lambd*av[-1]
+            elif(not(done)):
+                calc = r+self.gamma * self.V(torch.tensor(self.list_e_a_r_d[indice+1][0])).detach() - self.V(obs).detach()
+            else:
+                calc = r - self.V(obs).detach()
+            av.append(calc)
+        """
+    
         return av
 
 
 
-
 if __name__ == '__main__':
-    env = gym.make('LunarLander-v2')
+    #num_env : 1 : Cartpole et 2 : lunarlander
+    num_env = 1
+
+    if(num_env == 1):
+        #Cartpole env
+        env = gym.make('CartPole-v1')
+        taille_desc = 4
+    elif(num_env == 2):
+        #Lunar Lander env
+        env = gym.make('LunarLander-v2')
+        taille_desc = 8
+    else:
+        print("num error")
+        exit(0)
 
     # Enregistrement de l'Agent
-    agent = PPO_clipedAgent(tailleDesc=8, nbAction=env.action_space.n, nbEvent=2000, nbstep=4,lambd=.1,gamma=0.9, epsilon=2e-1)
-    #agent = PPO_classiqueAgent(tailleDesc=8, nbAction=env.action_space.n, nbEvent=2000, nbstep=20,lambd=.1, beta=1,gamma=0.9)
+    #Agent PPO classique
+    #agent = PPO_classiqueAgent(tailleDesc=taille_desc, nbAction=env.action_space.n, nbEvent=2000, nbstep=10,lambd=.1, beta=1,gamma=0.99)
+    #Agent PPO cliped
+    agent = PPO_clipedAgent(tailleDesc=taille_desc, nbAction=env.action_space.n, nbEvent=2000, nbstep=4,lambd=.1,gamma=0.99, epsilon=2e-1)
+    #Agent PPO sans clip et sans dkl
+    #agent = PPO_wihtout_all(tailleDesc=taille_desc, nbAction=env.action_space.n, nbEvent=2000, nbstep=10,lambd=.1,gamma=0.99, epsilon=2e-1)
 
     outdir = 'LunarLander-v2/results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)
 
-    episode_count = 500
+    episode_count = 1000
     reward = 0
     done = False
     env.verbose = True
