@@ -15,7 +15,9 @@ import copy
 import torch.nn as nn
 import numpy as np
 import torch
-from random import sample 
+import random
+import time
+import matplotlib.pyplot as plt
 
 
 """
@@ -99,7 +101,7 @@ class NN_softmax(nn.Module):
         return x
 
 class all_agent():
-    def __init__(self,number_of_agent,taille_obs,taille_action_space,number_sample,GAMMA=0.99):
+    def __init__(self,number_of_agent,taille_obs,taille_action_space,number_sample,GAMMA=0.99,update_target=5):
         print("Taille obs space",taille_obs)
         print("Action Space size",taille_action_space)
         self.number_of_agent = number_of_agent
@@ -111,18 +113,24 @@ class all_agent():
         self.liste_mu = []
         self.liste_mu_target = []
         self.liste_Q_opti = []
+        self.liste_mu_opti = []
         for _ in range(number_of_agent):
             Q = NN( (taille_obs+taille_action_space)*number_of_agent,1,layers=[25])
             self.liste_Q.append(Q)
-            opti_Q = torch.optim.Adam(self.Q.parameters())
+            opti_Q = torch.optim.Adam(Q.parameters())
             self.liste_Q_opti.append(opti_Q)
             mu = NN_softmax(taille_obs,taille_action_space)
             self.liste_mu.append(mu)
+            opti_mu = torch.optim.Adam(mu.parameters())
+            self.liste_mu_opti.append(opti_mu)
             mu_target = NN_softmax(taille_obs,taille_action_space)
             self.liste_mu_target.append(mu_target)
         self.experience = []
         self.ancien_obs = None
         self.ancien_action = None
+        self.criterion = torch.nn.MSELoss()
+        self.compteur_optim_step=0
+        self.update_target = update_target
     
     def act(self, obs, reward):
         if(self.ancien_obs != None):
@@ -131,64 +139,87 @@ class all_agent():
         for num_agent in range(self.number_of_agent):
             N = np.random.standard_normal(self.taille_action_space)
             obs_agent = torch.tensor(obs[num_agent]).float()
-            mu = self.liste_mu[num_agent](obs_agent)
+            mu = self.liste_mu_target[num_agent](obs_agent)
             action = mu.detach().numpy() + N
-            print(action)
+            #print(action)
             all_action.append(np.array(action))
         self.ancien_obs = o
         self.ancien_action = all_action
+        if(len(self.experience) > self.number_sample):
+            self.optim_reseaux()
         return all_action
 
     def optim_reseaux(self):
-        sample = sample(self.experience,self.number_sample)
+        sample = random.sample(self.experience,self.number_sample)
+        #Mise à jour des valeurs Q
         for num_agent in range(self.number_of_agent):
             label_agent = []
+            list_valeur_mu = torch.tensor([])
             batch_pred = torch.tensor([])
-            for x, a, r, x_prime in zip(sample):
+            for x, a, r, x_prime in sample:
                 #Calcul des labels y_i
                 action_with_target_net = torch.tensor([])
                 for num_agent2 in range(self.number_of_agent):
                     N = np.random.standard_normal(self.taille_action_space)
                     obs_agent = torch.tensor(x_prime[num_agent2]).float()
                     mu_prime = self.liste_mu_target[num_agent2](obs_agent)
-                    action_target = mu + torch.tensor(N)
-                    action_with_target_net.cat(action_target)
-                entree_Q = torch.cat(x_prime,action_with_target_net)
+                    action_target = mu_prime + torch.tensor(N)
+                    action_with_target_net = torch.cat((action_with_target_net,action_target.float()))
+                entree_Q = torch.cat((torch.tensor(x_prime).reshape(-1).float(),action_with_target_net))
                 Q_value = self.liste_Q[num_agent](entree_Q)
-                y_i = r + self.gamma*Q_value
-                label_agent.append(y_i)
+                y_i = torch.tensor(r[num_agent]) + self.gamma*Q_value
+
+                label_agent.append(y_i.detach().numpy())
                 #Calcul des predictions du réseaux
-                entree_Q = torch.cat(x,a)
-                batch_pred = torch.stack(batch_pred,entree_Q)
-            self.liste_Q_opti[num_agent].zero_grad()
+                entree_Q = torch.cat((torch.tensor(x).reshape(-1),torch.tensor(a).reshape(-1)))
+                batch_pred = torch.cat((batch_pred.float(),entree_Q.reshape(1,-1).float()))
+                #Calcul pour la mise à jour de la politique
+                mu = self.liste_mu[num_agent](torch.tensor(x[num_agent]).float())
+                list_valeur_mu = torch.cat((list_valeur_mu.float(),mu.reshape(1,-1).float()))
+    
             pred = self.liste_Q[num_agent](batch_pred)
+            pred = pred.reshape(-1)
+            #pred c'est Q_i
+            #Mise a jours de la politique 
+            #ATTENTION DERIVE UNIQUEMENT PAR RAPPORT A a_i DONC FAIRE DETACH POUR LE RESTE
+            actor_maximise = torch.sum(torch.t(list_valeur_mu)*pred.detach())
+            actor_maximise = actor_maximise/self.number_sample
+            actor_minimise = -actor_maximise
+            self.liste_mu_opti[num_agent].zero_grad()
+            actor_minimise.backward(retain_graph=True)
+            self.liste_mu_opti[num_agent].step()
+
+            label_agent = torch.tensor(label_agent).reshape(-1)
             loss = self.criterion(pred,label_agent)
+            self.liste_Q_opti[num_agent].zero_grad()
+            loss.backward()
             self.liste_Q_opti[num_agent].step()
-
-                
-
-
-
+            self.compteur_optim_step+=1
+            if(self.compteur_optim_step > self.update_target):
+                self.liste_mu_target = copy.deepcopy(self.liste_mu)
+                self.compteur_optim_step=0
 
         
 
 
 if __name__ == '__main__':
-
-
     env,scenario,world = make_env('simple_spread')
-    o = env.reset()
-    decideur = all_agent(len(env.agents),len(o[0]),env.world.dim_p,20)
-    r=0
-    reward = []
+    all_multiple_reward = []
     for _ in range(100):
-        print(o)
-        a = decideur.act(o,r)
-        o, r, d, i = env.step(a)
-        print(a)
-        reward.append(r)
-        env.render(mode="none")
-    print(reward)
-
+        o = env.reset()
+        decideur = all_agent(len(env.agents),len(o[0]),env.world.dim_p,20)
+        r=0
+        reward = []
+        for _ in range(30):
+            #print(o)
+            a = decideur.act(o,r)
+            o, r, d, i = env.step(a)
+            #print(a)
+            reward.append(r)
+            env.render(mode="none")
+        print(np.sum(reward))
+        all_multiple_reward.append(np.sum(reward))
 
     env.close()
+    plt.plot(all_multiple_reward)
+    plt.show()
