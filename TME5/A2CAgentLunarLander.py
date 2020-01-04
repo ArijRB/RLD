@@ -1,5 +1,5 @@
 import matplotlib
-import matplotlib.pyplot as plt
+
 matplotlib.use("TkAgg")
 import gym
 import gridworld
@@ -8,6 +8,7 @@ import numpy as np
 import copy
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 class RandomAgent(object):
     """The world's simplest agent!"""
@@ -43,6 +44,7 @@ class NN2(nn.Module):
             inSize = x
         self.layers.append(nn.Linear(inSize, outSize))
     def forward(self, x):
+     
         x = self.layers[0](x)
         for i in range(1, len(self.layers)):
             x = torch.nn.functional.leaky_relu(x)
@@ -54,11 +56,10 @@ class NN2(nn.Module):
 
 class A2C(object):
     """The world's simplest agent!"""
-    def __init__(self, action_space,tailleDescription, tMax,gamma, pasMaj):
+    def __init__(self, action_space,tailleDescription, gamma, pasMaj,inSize,outSize):
         self.action_space = action_space
-        self.Pi = NN2(tailleDescription,action_space.n,[200])
-        self.V = NN1(tailleDescription,1,[200])
-        self.tMax = tMax
+        self.Pi = NN2(inSize,outSize,[30,30])
+        self.V = NN1(inSize,1,[30,30])
         self.t = 0
         self.tstart = 0
         self.saveR = []
@@ -93,13 +94,11 @@ class A2C(object):
                 new.backward()
                 new2 = torch.pow(R-self.V(self.saveObs[i]),2)
                 new2.backward()
-            """
-            if( (self.t%self.tMax) % self.pasMaj == 0):
-                self.optimPi.step()
+
+            if(self.t%self.pasMaj == 0):
                 self.optimV.step()
-            """
+
             self.optimPi.step()
-            self.optimV.step()
             #self.tstart = self.t
             self.saveObs = []
             self.saveR = []
@@ -112,21 +111,22 @@ class A2C(object):
 
 
 
-
-
 if __name__ == '__main__':
 
 
-    env = gym.make('CartPole-v1')
-
-    # Enregistrement de l'Agent
-    #agent = RandomAgent(env.action_space)
-    agent = A2C(action_space = env.action_space,tailleDescription = 4, tMax=99999,gamma = 0.99, pasMaj = 1)
-    outdir = 'cartpole-v0/random-agent-results'
+    env = gym.make('LunarLander-v2')
+    outdir = 'LunarLander-v2/results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)
+    inSize = 8   
+    outSize = env.action_space.n  
+    # Enregistrement de l'Agent
+    #agent = RandomAgent(env.action_space)
+    inSize = env.observation_space.shape[0]    
+    outSize = env.action_space.n                
+    agent = A2C(action_space = env.action_space,tailleDescription = 8,gamma = 0.99, pasMaj = 1,inSize=inSize,outSize=outSize)
 
-    episode_count = 1000
+    episode_count = 10000
     reward = 0
     done = False
     env.verbose = True
@@ -137,7 +137,7 @@ if __name__ == '__main__':
 
     for i in range(episode_count):
         obs = envm.reset()
-        env.verbose = (i % 100 == 0 and i > 0)  # afficher 1 episode sur 100
+        env.verbose = (i % 10 == 0 and i > 0)  # afficher 1 episode sur 100
         if env.verbose:
             env.render()
         j = 0

@@ -54,19 +54,18 @@ class NN2(nn.Module):
 
 class A2C(object):
     """The world's simplest agent!"""
-    def __init__(self, action_space,tailleDescription, tMax,gamma, pasMaj):
+    def __init__(self, action_space,tailleDescription,gamma, pasMaj):
         self.action_space = action_space
         self.Pi = NN2(tailleDescription,action_space.n,[200])
         self.V = NN1(tailleDescription,1,[200])
-        self.tMax = tMax
         self.t = 0
         self.tstart = 0
         self.saveR = []
         self.saveObs = []
         self.action = []
         self.gamma = gamma
-        self.optimPi = torch.optim.Adam(self.Pi.parameters(),lr=1e-3)
-        self.optimV = torch.optim.Adam(self.V.parameters(),lr=1e-3)
+        self.optimPi = torch.optim.Adam(self.Pi.parameters(),lr=0.001)
+        self.optimV = torch.optim.Adam(self.V.parameters(),lr=0.001)
         self.pasMaj = pasMaj
 
     def act(self, observation, reward, done):
@@ -88,18 +87,14 @@ class A2C(object):
                 R = self.V(descriptionEtat).detach()
             for i in range(len(self.saveR)-1,-1,-1):
                 R = self.saveR[i] + self.gamma * R
-                #print()
                 new = -torch.log(self.Pi(self.saveObs[i])[self.action[i]])*(R-self.V(self.saveObs[i]).detach())
                 new.backward()
                 new2 = torch.pow(R-self.V(self.saveObs[i]),2)
                 new2.backward()
-            """
-            if( (self.t%self.tMax) % self.pasMaj == 0):
-                self.optimPi.step()
+            if(self.t%self.pasMaj == 0):
                 self.optimV.step()
-            """
+
             self.optimPi.step()
-            self.optimV.step()
             #self.tstart = self.t
             self.saveObs = []
             self.saveR = []
@@ -121,12 +116,12 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     #agent = RandomAgent(env.action_space)
-    agent = A2C(action_space = env.action_space,tailleDescription = 4, tMax=99999,gamma = 0.99, pasMaj = 1)
+    agent = A2C(action_space = env.action_space,tailleDescription = 4,gamma = 0.99, pasMaj = 1)
     outdir = 'cartpole-v0/random-agent-results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)
 
-    episode_count = 1000
+    episode_count = 2000
     reward = 0
     done = False
     env.verbose = True

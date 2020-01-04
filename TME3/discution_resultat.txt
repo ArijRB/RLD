@@ -1,1 +1,0 @@
-En pratique le value itération à l'air de beaucoup mieux fonctionner.
