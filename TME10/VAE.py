@@ -2,7 +2,12 @@ import torch
 import torchvision
 import torch.nn as nn
 import torch.functional as F
-
+from PIL import Image
+import numpy as np
+from matplotlib import cm
+import matplotlib.pyplot as plt
+import time
+import torch.distributions as tdist
 
 class Encodeur(nn.Module):
     def __init__(self,dimEntree,dimReduit,dimInter):
@@ -39,23 +44,31 @@ batch_size_test = 32
 train_loader = torch.utils.data.DataLoader(torchvision.datasets.MNIST('MNIST', train=True, download=True,
                              transform=torchvision.transforms.Compose([
                                torchvision.transforms.ToTensor(),
-                               torchvision.transforms.Normalize(
-                                 (0.1307,), (0.3081,))
                              ])),
   batch_size=batch_size_train, shuffle=True)
 
 test_loader = torch.utils.data.DataLoader(torchvision.datasets.MNIST('MNIST', train=False, download=True,
                              transform=torchvision.transforms.Compose([
                                torchvision.transforms.ToTensor(),
-                               torchvision.transforms.Normalize(
-                                 (0.1307,), (0.3081,))
                              ])),
   batch_size=batch_size_test, shuffle=True)
 
-DIMRED = 5
-DIMINTER = 30
+
+def random_image(dec,epoch,batch_idx):
+  random = alea.rsample()
+  z = random
+  pred = dec(z)
+  image_genere = pred.reshape(1,28,28)
+  echantillon = image_genere[0]
+  img = echantillon.data
+  plt.imshow(img, cmap='gray')
+  plt.savefig("echantillon_"+str(epoch)+"_"+str(batch_idx)+".png")
+
+DIMRED = 100
+DIMINTER = 200
 DIMENTREE = 784
 DIMSORTIE = 784
+NUM_EPOCH = 100
 
 encodeur = Encodeur(DIMENTREE,DIMRED,DIMINTER)
 decodeur = Decodeur(DIMRED,DIMSORTIE,DIMINTER)
@@ -63,27 +76,51 @@ decodeur = Decodeur(DIMRED,DIMSORTIE,DIMINTER)
 optim_enc = torch.optim.Adam(encodeur.parameters())
 optim_dec = torch.optim.Adam(decodeur.parameters())
 
-for batch_idx, (data, target) in enumerate(train_loader):
-    images = data.view(data.shape[0], -1) # bsx784
-    ecart, moyenne = encodeur(images)
-    bs = images.shape[0]
-    random = torch.zeros(bs, DIMRED).data.normal_(0, 1)
-    #torch.distribution.normal.Normal()
-    #d.rsample
+alea = tdist.Normal(torch.zeros(DIMRED), torch.ones(DIMRED))
+for epoch in range(NUM_EPOCH):
+  for batch_idx, (data, target) in enumerate(train_loader):
+      images = data.view(data.shape[0], -1) # bsx784
+      ecart, moyenne = encodeur(images)
+      bs = images.shape[0]
+      #random = torch.zeros(bs, DIMRED).data.normal_(0, 1)
+      random = alea.rsample()
+      #torch.distribution.normal.Normal()
+      #d.rsample
 
-    z = ecart*random+moyenne
-    pred = decodeur(z)
+      z = ecart*random+moyenne
+      pred = decodeur(z)
 
-    # reconstruction loss
-    print(pred.shape)
-    print(images.shape)
-    recon_loss = nn.BCELoss(pred, images)
+      #Affichage échantillon
+      if(batch_idx%10000==0):
+        random_image(decodeur,epoch,batch_idx)
+        """
+        image_genere = pred.reshape(bs,28,28)
+        echantillon = image_genere[0]
+        im = Image.fromarray(np.uint8(cm.gist_earth(echantillon.detach().numpy())*255))
+        newsize = (280, 280) 
+        im = im.resize(newsize) 
+        #im.show()
+        img = echantillon.data
+        plt.imshow(img, cmap='gray')
+        plt.savefig("echantillon_"+str(epoch)+"_"+str(batch_idx)+".png")
+        #plt.show()
+        """
 
-    # kl divergence loss
-    kl_loss = 0.5 * torch.sum(torch.exp(ecart) + moyenne**2 - 1.0 - ecart)
+      # reconstruction loss
+      bce = nn.BCELoss()
+      recon_loss = bce(pred, images)
 
-    # total loss
-    loss = recon_loss + kl_loss
-    loss.backward()
-    optim_dec.step()
-    optim_enc.step()
+      # kl divergence loss
+      #kl_loss = F.kl_div()
+      kl_loss = -0.5 * torch.sum(1 + ecart - moyenne.pow(2) - ecart.exp())
+      #kl_loss = 0.5 * torch.sum(torch.exp(ecart) + moyenne**2 - 1.0 - ecart)
+
+      # total loss
+      optim_dec.zero_grad()
+      optim_enc.zero_grad()
+      loss = recon_loss + kl_loss
+      loss.backward()
+      optim_dec.step()
+      optim_enc.step()
+
+      

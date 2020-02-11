@@ -155,7 +155,12 @@ class PPO_classiqueAgent(object):
 
     def calc_avantage(self):
         #Version simplifié
-        result = torch.tensor([li[2] for li in self.list_e_a_r_d]).detach().numpy() - self.V(torch.tensor([li[0] for li in self.list_e_a_r_d]).float().detach()).detach().numpy()
+        #result = torch.tensor([li[2] for li in self.list_e_a_r_d]).detach().numpy() - self.V(torch.tensor([li[0] for li in self.list_e_a_r_d]).float().detach()).detach().numpy()
+        #Version 2 : peut etre nul
+        print(len(list_e_a_r_d))
+        obs_st = [0]+[li[0] for li in self.list_e_a_r_d[1:]]
+        print(len(obs_st))
+        result = torch.tensor([li[2] for li in self.list_e_a_r_d]).detach().numpy() - self.gamma*self.V(torch.tensor([li[0] for li in self.list_e_a_r_d]).float().detach()).detach().numpy() - self.V(obs_st).detach()
         return result
         
 
@@ -291,7 +296,15 @@ class PPO_clipedAgent(object):
 
     def calc_avantage(self):
         #Version simplifié
-        result = torch.tensor([li[2] for li in self.list_e_a_r_d]).detach().numpy() - self.V(torch.tensor([li[0] for li in self.list_e_a_r_d]).float().detach()).detach().numpy()
+        #result = torch.tensor([li[2] for li in self.list_e_a_r_d]).detach().numpy() - self.V(torch.tensor([li[0] for li in self.list_e_a_r_d]).float().detach()).detach().numpy()
+        #Version 2 : peut etre faux
+        #print(len(self.list_e_a_r_d))
+        obs_st = torch.tensor([li[0] for li in self.list_e_a_r_d[1:]]).float().detach()
+        #print(obs_st[0])
+        #print(torch.tensor(self.list_e_a_r_d[0][0]).float().shape)
+        obs_st = torch.cat((torch.tensor(self.list_e_a_r_d[0][0]).float().reshape(1,-1),obs_st))
+        #print(obs_st.shape)
+        result = torch.tensor([li[2] for li in self.list_e_a_r_d]).detach().numpy() - self.gamma*self.V(torch.tensor([li[0] for li in self.list_e_a_r_d]).float().detach()).detach().numpy() - self.V(obs_st).float().detach().numpy()
         return result
         
 
@@ -313,6 +326,122 @@ class PPO_clipedAgent(object):
         """
     
         return av
+
+
+class PPO_clipedAgent_v42(object):
+    #exemple hyper param : tailleDesc=8, nbEvent=4000, nb_step_Pi=80, nb_step_V=80 ,structure_reseaux=[64] ,gamma=0,99 ,epsilon=0.2
+    def __init__(self,tailleDesc, nb_action_dispo, nbEvent, nb_step_Pi ,nb_step_V ,structure_reseaux ,gamma ,epsilon):
+        #Réseaux et optimiser
+        self.V = NN_V(tailleDesc,1,structure_reseaux)
+        self.Pi = NN_Pi(tailleDesc,nb_action_dispo,structure_reseaux)
+        self.Pi_old = None
+        self.optim_V = torch.optim.Adam(self.V.parameters())
+        self.optim_Pi = torch.optim.Adam(self.Pi.parameters())
+        #hyper paramettre
+        self.nbEvent = nbEvent
+        self.gamma = gamma
+        self.nb_step_Pi = nb_step_Pi
+        self.nb_step_V = nb_step_V
+        self.epsilon = epsilon
+        #Compteur pour savoir quand on a fait nbEvent action et mettre a jours le réseaux
+        self.compteur = 0
+        #save precedent obs and action
+        self.old_obs = None
+        self.old_action = None
+        #buffer
+        self.buffer_obs= []
+        self.buffer_act = []
+        self.buffer_reward = []
+        self.buffer_done = []
+
+    def act(self, observation, reward, done):
+        if(self.old_obs is not None):
+            self.buffer_obs.append(self.old_obs)
+            self.buffer_act.append(self.old_action)
+            self.buffer_reward.append(reward)
+            self.buffer_done.append(done)
+        
+        dist = self.Pi(torch.tensor(observation).float())
+        m = torch.distributions.categorical.Categorical(dist)
+        a = m.sample()
+        a = a.item()
+
+        self.old_obs = observation
+        self.old_action = a
+
+        self.compteur+=1
+        if(self.compteur>self.nbEvent):
+            self.optimisation()
+            #Renitialisation des buffers et du compteur
+            self.compteur = 0
+            self.buffer_obs= []
+            self.buffer_act = []
+            self.buffer_reward = []
+            self.buffer_done = []
+        return a
+    
+    def optimisation(self):
+        reward_to_go = self.calc_reward_to_go()
+        advantage = self.calc_avantage()
+
+        #Optimisation du réseaux Pi
+        self.Pi_old = copy.deepcopy(self.Pi)
+        #Pi_teta_old est appelé Pi_teta_k dans les slides de cours
+        Pi_teta_old = self.Pi_old(torch.tensor(self.buffer_obs).float()).detach()
+        action_prise = torch.tensor(self.buffer_act)
+        #On selectionne uniquement la proba de l'action prise
+        Pi_teta_old = Pi_teta_old[range(len(Pi_teta_old)),action_prise]
+        for step_Pi in range(self.nb_step_Pi):
+            Pi_teta = self.Pi(torch.tensor(self.buffer_obs).float())
+            Pi_teta = Pi_teta[range(len(Pi_teta)),action_prise]
+            ratio = Pi_teta/Pi_teta_old
+            premier_terme = ratio*advantage
+            deuxieme_terme = torch.clamp(ratio, 1-self.epsilon, 1+self.epsilon)*advantage
+            loss = -torch.min(premier_terme,deuxieme_terme)
+            self.optim_Pi.zero_grad()
+            loss.mean().backward()
+            self.optim_Pi.step()
+
+        #Optimisation du réseaux V
+        criterion = torch.nn.MSELoss()
+        for _ in range(self.nb_step_V): 
+            pred_V = self.V(torch.tensor(self.buffer_obs).float()).reshape(-1)
+            #loss_V = criterion(pred_V,reward_to_go)
+            #test loss_V
+            loss_V = torch.sum(torch.pow(pred_V-reward_to_go,2))/self.nbEvent
+            self.optim_V.zero_grad()
+            loss_V.backward()
+            self.optim_V.step()
+
+    
+    def calc_reward_to_go(self):
+        reward_to_go = []
+        for k in range(len(self.buffer_reward)-1,-1,-1):
+            reward = self.buffer_reward[k]
+            done = self.buffer_done[k]
+            if(len(reward_to_go) != 0 and not done):
+                item_RTG = reward+self.gamma*reward_to_go[-1]
+            else:
+                item_RTG=reward
+            reward_to_go.append(item_RTG)
+        #On doit ré inverser la liste pour etre dans le bon ordre
+        reward_to_go = list(reversed(reward_to_go))
+        return torch.tensor(reward_to_go)
+
+
+    def calc_avantage(self):
+        avantages = []
+        for k in range(len(self.buffer_obs)):
+            S_t = torch.tensor(self.buffer_obs[k]).float()
+            if(self.buffer_done[k] or k==len(self.buffer_obs)-1):
+                av = -self.V(S_t)+self.buffer_reward[k]
+            else:
+                S_tp1 = torch.tensor(self.buffer_obs[k+1]).float()
+                av = -self.V(S_t)+self.buffer_reward[k]+self.gamma*self.V(S_tp1)
+            avantages.append(av)
+        return torch.tensor(avantages).detach()
+
+
 
 
 class PPO_wihtout_all(object):
@@ -348,7 +477,7 @@ class PPO_wihtout_all(object):
 
         self.old_obs = observation
         self.old_action = a
-        self.old_distrib = dist.detach()
+        self.old_distrib = dist#.detach()
 
         self.compteur+=1
         if(self.compteur>self.nbEvent):
@@ -365,7 +494,7 @@ class PPO_wihtout_all(object):
 
         action_prise = [li[1] for li in self.list_e_a_r_d]
         action_prise = torch.tensor(action_prise)
-        action_prise = action_prise.detach()
+        action_prise = action_prise#.detach()
 
         saveR = [li[2] for li in self.list_e_a_r_d]
         saveR = torch.tensor(saveR)
@@ -455,7 +584,7 @@ class PPO_wihtout_all(object):
 
 if __name__ == '__main__':
     #num_env : 1 : Cartpole et 2 : lunarlander
-    num_env = 1
+    num_env = 2
 
     if(num_env == 1):
         #Cartpole env
@@ -473,15 +602,16 @@ if __name__ == '__main__':
     #Agent PPO classique
     #agent = PPO_classiqueAgent(tailleDesc=taille_desc, nbAction=env.action_space.n, nbEvent=2000, nbstep=10,lambd=.1, beta=1,gamma=0.99)
     #Agent PPO cliped
-    agent = PPO_clipedAgent(tailleDesc=taille_desc, nbAction=env.action_space.n, nbEvent=2000, nbstep=4,lambd=.1,gamma=0.99, epsilon=2e-1)
+    #agent = PPO_clipedAgent(tailleDesc=taille_desc, nbAction=env.action_space.n, nbEvent=2000, nbstep=30,lambd=.1,gamma=0.99, epsilon=2e-1)
     #Agent PPO sans clip et sans dkl
     #agent = PPO_wihtout_all(tailleDesc=taille_desc, nbAction=env.action_space.n, nbEvent=2000, nbstep=10,lambd=.1,gamma=0.99, epsilon=2e-1)
 
+    agent = PPO_clipedAgent_v42(tailleDesc=taille_desc,nb_action_dispo=env.action_space.n , nbEvent=2000, nb_step_Pi=80, nb_step_V=80 ,structure_reseaux=[256] ,gamma=0.99 ,epsilon=0.2)
     outdir = 'LunarLander-v2/results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
     env.seed(0)
 
-    episode_count = 1000
+    episode_count = 5000
     reward = 0
     done = False
     env.verbose = True
@@ -491,7 +621,7 @@ if __name__ == '__main__':
     env._max_episode_steps = 200
     for i in range(episode_count):
         obs = envm.reset()
-        env.verbose = (i % 10 == 0 and i > 0)  # afficher 1 episode sur 100
+        env.verbose = (i % 100 == 0 and i > 0)  # afficher 1 episode sur 100
         if env.verbose:
             env.render()
         j = 0
