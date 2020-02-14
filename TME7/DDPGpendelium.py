@@ -116,12 +116,10 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     #agent = RandomAgent(env.action_space)
-    agent = DDPGAgent(2, -100, 100)
+    agent = DDPGAgent(1, env.action_space.low, env.action_space.high)
 
-    outdir = 'MountainCarContinuous-v0/results'
-    envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
+    env = gym.make('Pendulum-v0')
     env.seed(0)
-
     episode_count = 100000
     reward = 0
     done = False

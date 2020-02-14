@@ -116,10 +116,13 @@ if __name__ == '__main__':
 
     # Enregistrement de l'Agent
     #agent = RandomAgent(env.action_space)
-    agent = DDPGAgent(2, -100, 100)
+    agent = DDPGAgent(8,  env.action_space.low, env.action_space.high)
 
-    outdir = 'MountainCarContinuous-v0/results'
+    env = gym.make('LunarLander-v2')
+    outdir = 'LunarLander-v2/results'
     envm = wrappers.Monitor(env, directory=outdir, force=True, video_callable=False)
+    env.seed(0)  
+    outSize = env.action_space.n  
     env.seed(0)
 
     episode_count = 100000
