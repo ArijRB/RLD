@@ -1,9 +1,9 @@
 # RLD
 
-##Reinforcement Learning et Deep learning Avancé
+## Reinforcement Learning et Deep learning Avancé
 Implémentation d'algorithmes de Reinforcement Learning 
 
-Master 2 DAC 2019 responsable: Sylvain Lamprier
+### Master 2 DAC 2019 responsable: Sylvain Lamprier
 
 Théorie et Algorithme de l’apprentissage par renforcement; deep reinforcement learning, modèles génératifs (VAE, GANs), modèles stochastiques, modèles adverses, études de cas sur applications.
 
